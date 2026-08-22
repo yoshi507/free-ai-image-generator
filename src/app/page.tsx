@@ -11,11 +11,16 @@ import {
   Copy,
   Check,
   LogIn,
+  LogOut,
   Plus,
   Trash2,
   Image as ImageIcon,
   Zap,
+  Mail,
+  X,
 } from "lucide-react";
+import { getSupabase, isSupabaseConfigured } from "@/lib/supabase";
+import type { User } from "@supabase/supabase-js";
 
 type GeneratedImage = {
   id: string;
@@ -53,13 +58,39 @@ export default function Home() {
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [newKeyName, setNewKeyName] = useState("");
 
+  const [user, setUser] = useState<User | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [showLogin, setShowLogin] = useState(false);
+  const [email, setEmail] = useState("");
+  const [authMessage, setAuthMessage] = useState<string | null>(null);
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [sendingLink, setSendingLink] = useState(false);
+
   useEffect(() => {
+    const supabase = getSupabase();
+
     try {
       const h = localStorage.getItem("ai-img-history");
       if (h) setHistory(JSON.parse(h));
       const k = localStorage.getItem("ai-img-keys");
       if (k) setApiKeys(JSON.parse(k));
     } catch {}
+
+    if (!supabase) {
+      setAuthLoading(false);
+      return;
+    }
+
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setUser(session?.user ?? null);
+      setAuthLoading(false);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
+    });
+
+    return () => subscription.unsubscribe();
   }, []);
 
   useEffect(() => {
@@ -69,6 +100,44 @@ export default function Home() {
   useEffect(() => {
     if (apiKeys.length) localStorage.setItem("ai-img-keys", JSON.stringify(apiKeys));
   }, [apiKeys]);
+
+  const handleMagicLink = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAuthError(null);
+    setAuthMessage(null);
+
+    if (!email.trim()) {
+      setAuthError("Please enter your email");
+      return;
+    }
+
+    const supabase = getSupabase();
+    if (!supabase) {
+      setAuthError("Supabase is not configured. Add the environment variables in Vercel.");
+      return;
+    }
+
+    setSendingLink(true);
+    const { error } = await supabase.auth.signInWithOtp({
+      email: email.trim(),
+      options: {
+        emailRedirectTo: typeof window !== "undefined" ? window.location.origin : undefined,
+      },
+    });
+    setSendingLink(false);
+
+    if (error) {
+      setAuthError(error.message);
+    } else {
+      setAuthMessage("Check your email for the magic link! ✨");
+    }
+  };
+
+  const handleSignOut = async () => {
+    const supabase = getSupabase();
+    if (supabase) await supabase.auth.signOut();
+    setUser(null);
+  };
 
   const generateImage = async () => {
     if (!prompt.trim()) return;
@@ -185,17 +254,32 @@ export default function Home() {
             ))}
           </nav>
 
-          <button
-            onClick={() =>
-              alert(
-                "Email login (magic link or password) is ready!\n\nThe app works perfectly without any account right now.\n\nTo enable real email sign-in:\n1. Create free Supabase project\n2. Enable Email auth\n3. Add NEXT_PUBLIC_SUPABASE_URL + ANON_KEY to Vercel\n4. Redeploy\n\nSee Docs tab for details."
-              )
-            }
-            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-sm transition-all"
-          >
-            <LogIn className="w-4 h-4" />
-            <span className="hidden sm:inline">Sign in</span>
-          </button>
+          <div className="flex items-center gap-2">
+            {authLoading ? (
+              <div className="w-8 h-8 rounded-full bg-white/10 animate-pulse" />
+            ) : user ? (
+              <div className="flex items-center gap-3">
+                <span className="text-sm text-white/70 hidden sm:inline truncate max-w-[140px]">
+                  {user.email}
+                </span>
+                <button
+                  onClick={handleSignOut}
+                  className="flex items-center gap-2 px-3 py-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-sm transition-all"
+                >
+                  <LogOut className="w-4 h-4" />
+                  <span className="hidden sm:inline">Sign out</span>
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => setShowLogin(true)}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-violet-600 hover:bg-violet-500 text-sm font-medium transition-all"
+              >
+                <LogIn className="w-4 h-4" />
+                <span className="hidden sm:inline">Sign in</span>
+              </button>
+            )}
+          </div>
         </div>
       </header>
 
@@ -219,6 +303,85 @@ export default function Home() {
           </button>
         ))}
       </div>
+
+      {showLogin && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
+          <div className="bg-[#121826] border border-white/10 rounded-2xl w-full max-w-md p-6 shadow-2xl relative">
+            <button
+              onClick={() => {
+                setShowLogin(false);
+                setAuthMessage(null);
+                setAuthError(null);
+              }}
+              className="absolute top-4 right-4 text-white/50 hover:text-white"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="text-center mb-6">
+              <div className="w-12 h-12 rounded-xl bg-violet-600/20 flex items-center justify-center mx-auto mb-3">
+                <Mail className="w-6 h-6 text-violet-400" />
+              </div>
+              <h2 className="text-xl font-bold">Sign in with Email</h2>
+              <p className="text-sm text-white/50 mt-1">
+                We’ll send you a magic link — no password needed
+              </p>
+            </div>
+
+            {!isSupabaseConfigured ? (
+              <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-4 text-sm text-amber-200">
+                <p className="font-medium mb-1">Supabase not connected yet</p>
+                <p className="text-amber-200/80">
+                  Add <code className="text-xs">NEXT_PUBLIC_SUPABASE_URL</code> and{" "}
+                  <code className="text-xs">NEXT_PUBLIC_SUPABASE_ANON_KEY</code> in your Vercel
+                  environment variables, then redeploy.
+                </p>
+              </div>
+            ) : (
+              <form onSubmit={handleMagicLink} className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-white/70 mb-1.5">
+                    Email address
+                  </label>
+                  <input
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="you@example.com"
+                    className="w-full px-4 py-3 rounded-xl bg-[#0b0f19] border border-white/10 focus:border-violet-500 outline-none text-sm"
+                    required
+                  />
+                </div>
+
+                {authError && (
+                  <p className="text-sm text-red-400">{authError}</p>
+                )}
+                {authMessage && (
+                  <p className="text-sm text-green-400">{authMessage}</p>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={sendingLink}
+                  className="w-full py-3 rounded-xl bg-violet-600 hover:bg-violet-500 font-medium transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  {sendingLink ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      Sending...
+                    </>
+                  ) : (
+                    <>
+                      <Mail className="w-4 h-4" />
+                      Send Magic Link
+                    </>
+                  )}
+                </button>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
 
       <main className="max-w-6xl mx-auto px-4 py-8">
         {activeTab === "generate" && (
@@ -343,6 +506,18 @@ export default function Home() {
               </p>
             </div>
 
+            {!user && (
+              <div className="bg-violet-500/10 border border-violet-500/20 rounded-xl p-4 text-sm text-violet-200 flex items-center justify-between gap-4">
+                <span>Sign in to save your API keys across devices.</span>
+                <button
+                  onClick={() => setShowLogin(true)}
+                  className="px-3 py-1.5 rounded-lg bg-violet-600 hover:bg-violet-500 text-xs font-medium whitespace-nowrap"
+                >
+                  Sign in
+                </button>
+              </div>
+            )}
+
             <div className="bg-[#121826] border border-white/10 rounded-2xl p-6">
               <div className="flex flex-col sm:flex-row gap-3">
                 <input
@@ -407,12 +582,6 @@ export default function Home() {
                 ))}
               </div>
             )}
-
-            <div className="bg-violet-500/10 border border-violet-500/20 rounded-xl p-4 text-sm text-violet-200">
-              <strong>Note:</strong> Keys are stored locally in your browser for demo purposes.
-              The generation API works with or without a key. For production multi-user keys + email
-              login, connect Supabase (see Docs).
-            </div>
           </div>
         )}
 
@@ -420,7 +589,7 @@ export default function Home() {
           <div className="space-y-6">
             <div>
               <h2 className="text-2xl font-bold mb-1">Generation History</h2>
-              <p className="text-white/50 text-sm">Your recent images (stored locally)</p>
+              <p className="text-white/50 text-sm">Your recent images</p>
             </div>
 
             {history.length === 0 ? (
@@ -503,20 +672,6 @@ Content-Type: application/json`}
   -d '{"prompt": "a cute robot cat"}'`}
                 </pre>
               </div>
-
-              <div>
-                <h3 className="font-semibold mb-2">Response</h3>
-                <pre className="bg-[#0b0f19] p-4 rounded-lg text-sm overflow-x-auto text-white/80">
-{`{
-  "success": true,
-  "image_url": "https://image.pollinations.ai/...",
-  "prompt": "a cute robot cat",
-  "model": "flux",
-  "seed": 123456,
-  "generated_at": "2026-08-22T..."
-}`}
-                </pre>
-              </div>
             </div>
 
             <div className="bg-[#121826] border border-white/10 rounded-2xl p-6">
@@ -524,46 +679,9 @@ Content-Type: application/json`}
               <p className="text-white/60 text-sm leading-relaxed">
                 Images are generated by{" "}
                 <strong className="text-white">Pollinations.ai</strong> — a free,
-                open community service that runs models like Flux. No API key is
-                required on their side for normal usage. This keeps PixelForge
-                completely free for everyone.
+                open community service that runs models like Flux. This keeps
+                PixelForge completely free for everyone.
               </p>
-            </div>
-
-            <div className="bg-[#121826] border border-white/10 rounded-2xl p-6">
-              <h3 className="font-semibold mb-3">
-                Upgrade to real Email Login + Server-side Keys
-              </h3>
-              <ol className="text-sm text-white/60 space-y-2 list-decimal list-inside leading-relaxed">
-                <li>
-                  Create a free project at{" "}
-                  <a
-                    href="https://supabase.com"
-                    target="_blank"
-                    className="text-violet-400 hover:underline"
-                  >
-                    supabase.com
-                  </a>
-                </li>
-                <li>Authentication → Providers → enable Email (magic link + password)</li>
-                <li>
-                  Create tables for{" "}
-                  <code className="text-violet-300">api_keys</code> and{" "}
-                  <code className="text-violet-300">generations</code>
-                </li>
-                <li>
-                  Add{" "}
-                  <code className="text-violet-300">NEXT_PUBLIC_SUPABASE_URL</code>{" "}
-                  and{" "}
-                  <code className="text-violet-300">
-                    NEXT_PUBLIC_SUPABASE_ANON_KEY
-                  </code>{" "}
-                  to Vercel env vars
-                </li>
-                <li>
-                  Redeploy — email login & persistent keys will activate
-                </li>
-              </ol>
             </div>
           </div>
         )}
