@@ -10,17 +10,11 @@ import {
   ExternalLink,
   Copy,
   Check,
-  LogIn,
-  LogOut,
   Plus,
   Trash2,
   Image as ImageIcon,
   Zap,
-  Mail,
-  X,
 } from "lucide-react";
-import { getSupabase, isSupabaseConfigured } from "@/lib/supabase";
-import type { User } from "@supabase/supabase-js";
 
 type GeneratedImage = {
   id: string;
@@ -34,7 +28,6 @@ type ApiKey = {
   name: string;
   key: string;
   createdAt: number;
-  lastUsed?: number;
 };
 
 const STYLE_PRESETS = [
@@ -58,86 +51,26 @@ export default function Home() {
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [newKeyName, setNewKeyName] = useState("");
 
-  const [user, setUser] = useState<User | null>(null);
-  const [authLoading, setAuthLoading] = useState(true);
-  const [showLogin, setShowLogin] = useState(false);
-  const [email, setEmail] = useState("");
-  const [authMessage, setAuthMessage] = useState<string | null>(null);
-  const [authError, setAuthError] = useState<string | null>(null);
-  const [sendingLink, setSendingLink] = useState(false);
-
   useEffect(() => {
-    const supabase = getSupabase();
-
     try {
-      const h = localStorage.getItem("ai-img-history");
+      const h = localStorage.getItem("pixelforge-history");
       if (h) setHistory(JSON.parse(h));
-      const k = localStorage.getItem("ai-img-keys");
+      const k = localStorage.getItem("pixelforge-keys");
       if (k) setApiKeys(JSON.parse(k));
     } catch {}
-
-    if (!supabase) {
-      setAuthLoading(false);
-      return;
-    }
-
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setUser(session?.user ?? null);
-      setAuthLoading(false);
-    });
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null);
-    });
-
-    return () => subscription.unsubscribe();
   }, []);
 
   useEffect(() => {
-    if (history.length) localStorage.setItem("ai-img-history", JSON.stringify(history.slice(0, 30)));
+    if (history.length) {
+      localStorage.setItem("pixelforge-history", JSON.stringify(history.slice(0, 30)));
+    }
   }, [history]);
 
   useEffect(() => {
-    if (apiKeys.length) localStorage.setItem("ai-img-keys", JSON.stringify(apiKeys));
+    if (apiKeys.length) {
+      localStorage.setItem("pixelforge-keys", JSON.stringify(apiKeys));
+    }
   }, [apiKeys]);
-
-  const handleMagicLink = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setAuthError(null);
-    setAuthMessage(null);
-
-    if (!email.trim()) {
-      setAuthError("Please enter your email");
-      return;
-    }
-
-    const supabase = getSupabase();
-    if (!supabase) {
-      setAuthError("Supabase is not configured. Add the environment variables in Vercel.");
-      return;
-    }
-
-    setSendingLink(true);
-    const { error } = await supabase.auth.signInWithOtp({
-      email: email.trim(),
-      options: {
-        emailRedirectTo: typeof window !== "undefined" ? window.location.origin : undefined,
-      },
-    });
-    setSendingLink(false);
-
-    if (error) {
-      setAuthError(error.message);
-    } else {
-      setAuthMessage("Check your email for the magic link! ✨");
-    }
-  };
-
-  const handleSignOut = async () => {
-    const supabase = getSupabase();
-    if (supabase) await supabase.auth.signOut();
-    setUser(null);
-  };
 
   const generateImage = async () => {
     if (!prompt.trim()) return;
@@ -172,7 +105,7 @@ export default function Home() {
         setLoading(false);
       };
       img.onerror = () => {
-        setError("Image failed to load. Try again.");
+        setError("Image failed to load. Please try again.");
         setLoading(false);
       };
       img.src = data.image_url;
@@ -185,13 +118,10 @@ export default function Home() {
   const createApiKey = () => {
     const name = newKeyName.trim() || `Key ${apiKeys.length + 1}`;
     const key = `sk_live_${crypto.randomUUID().replace(/-/g, "")}`;
-    const newKey: ApiKey = {
-      id: crypto.randomUUID(),
-      name,
-      key,
-      createdAt: Date.now(),
-    };
-    setApiKeys((prev) => [newKey, ...prev]);
+    setApiKeys((prev) => [
+      { id: crypto.randomUUID(), name, key, createdAt: Date.now() },
+      ...prev,
+    ]);
     setNewKeyName("");
   };
 
@@ -253,37 +183,10 @@ export default function Home() {
               </button>
             ))}
           </nav>
-
-          <div className="flex items-center gap-2">
-            {authLoading ? (
-              <div className="w-8 h-8 rounded-full bg-white/10 animate-pulse" />
-            ) : user ? (
-              <div className="flex items-center gap-3">
-                <span className="text-sm text-white/70 hidden sm:inline truncate max-w-[140px]">
-                  {user.email}
-                </span>
-                <button
-                  onClick={handleSignOut}
-                  className="flex items-center gap-2 px-3 py-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-sm transition-all"
-                >
-                  <LogOut className="w-4 h-4" />
-                  <span className="hidden sm:inline">Sign out</span>
-                </button>
-              </div>
-            ) : (
-              <button
-                onClick={() => setShowLogin(true)}
-                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-violet-600 hover:bg-violet-500 text-sm font-medium transition-all"
-              >
-                <LogIn className="w-4 h-4" />
-                <span className="hidden sm:inline">Sign in</span>
-              </button>
-            )}
-          </div>
         </div>
       </header>
 
-      <div className="md:hidden border-b border-white/10 flex overflow-x-auto">
+      <div className="md:hidden border-b border-white/10 flex">
         {[
           { id: "generate", label: "Generate" },
           { id: "keys", label: "API Keys" },
@@ -304,85 +207,6 @@ export default function Home() {
         ))}
       </div>
 
-      {showLogin && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
-          <div className="bg-[#121826] border border-white/10 rounded-2xl w-full max-w-md p-6 shadow-2xl relative">
-            <button
-              onClick={() => {
-                setShowLogin(false);
-                setAuthMessage(null);
-                setAuthError(null);
-              }}
-              className="absolute top-4 right-4 text-white/50 hover:text-white"
-            >
-              <X className="w-5 h-5" />
-            </button>
-
-            <div className="text-center mb-6">
-              <div className="w-12 h-12 rounded-xl bg-violet-600/20 flex items-center justify-center mx-auto mb-3">
-                <Mail className="w-6 h-6 text-violet-400" />
-              </div>
-              <h2 className="text-xl font-bold">Sign in with Email</h2>
-              <p className="text-sm text-white/50 mt-1">
-                We’ll send you a magic link — no password needed
-              </p>
-            </div>
-
-            {!isSupabaseConfigured ? (
-              <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-4 text-sm text-amber-200">
-                <p className="font-medium mb-1">Supabase not connected yet</p>
-                <p className="text-amber-200/80">
-                  Add <code className="text-xs">NEXT_PUBLIC_SUPABASE_URL</code> and{" "}
-                  <code className="text-xs">NEXT_PUBLIC_SUPABASE_ANON_KEY</code> in your Vercel
-                  environment variables, then redeploy.
-                </p>
-              </div>
-            ) : (
-              <form onSubmit={handleMagicLink} className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-white/70 mb-1.5">
-                    Email address
-                  </label>
-                  <input
-                    type="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="you@example.com"
-                    className="w-full px-4 py-3 rounded-xl bg-[#0b0f19] border border-white/10 focus:border-violet-500 outline-none text-sm"
-                    required
-                  />
-                </div>
-
-                {authError && (
-                  <p className="text-sm text-red-400">{authError}</p>
-                )}
-                {authMessage && (
-                  <p className="text-sm text-green-400">{authMessage}</p>
-                )}
-
-                <button
-                  type="submit"
-                  disabled={sendingLink}
-                  className="w-full py-3 rounded-xl bg-violet-600 hover:bg-violet-500 font-medium transition-all disabled:opacity-50 flex items-center justify-center gap-2"
-                >
-                  {sendingLink ? (
-                    <>
-                      <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                      Sending...
-                    </>
-                  ) : (
-                    <>
-                      <Mail className="w-4 h-4" />
-                      Send Magic Link
-                    </>
-                  )}
-                </button>
-              </form>
-            )}
-          </div>
-        </div>
-      )}
-
       <main className="max-w-6xl mx-auto px-4 py-8">
         {activeTab === "generate" && (
           <div className="space-y-8">
@@ -391,19 +215,17 @@ export default function Home() {
                 Free AI Image Generation
               </h1>
               <p className="text-white/50">
-                Unlimited • No account required • Powered by open models
+                Unlimited • Completely free • Powered by open models
               </p>
             </div>
 
-            <div className="bg-[#121826] border border-white/10 rounded-2xl p-6 md:p-8 shadow-2xl">
-              <label className="block text-sm font-medium text-white/70 mb-2">
-                Prompt
-              </label>
+            <div className="bg-[#121826] border border-white/10 rounded-2xl p-6 md:p-8">
+              <label className="block text-sm font-medium text-white/70 mb-2">Prompt</label>
               <textarea
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}
-                placeholder="A serene Japanese garden at dusk with cherry blossoms, ultra detailed, cinematic lighting..."
-                className="w-full h-28 px-4 py-3 rounded-xl bg-[#0b0f19] border border-white/10 focus:border-violet-500 focus:ring-1 focus:ring-violet-500/50 outline-none resize-none text-white placeholder:text-white/30 transition-all"
+                placeholder="A serene Japanese garden at dusk with cherry blossoms, ultra detailed..."
+                className="w-full h-28 px-4 py-3 rounded-xl bg-[#0b0f19] border border-white/10 focus:border-violet-500 outline-none resize-none text-white placeholder:text-white/30"
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && !e.shiftKey) {
                     e.preventDefault();
@@ -413,9 +235,7 @@ export default function Home() {
               />
 
               <div className="mt-5">
-                <label className="block text-sm font-medium text-white/70 mb-3">
-                  Style
-                </label>
+                <label className="block text-sm font-medium text-white/70 mb-3">Style</label>
                 <div className="flex flex-wrap gap-2">
                   {STYLE_PRESETS.map((p) => (
                     <button
@@ -436,7 +256,7 @@ export default function Home() {
               <button
                 onClick={generateImage}
                 disabled={loading || !prompt.trim()}
-                className="mt-6 w-full py-3.5 rounded-xl font-semibold bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2 shadow-lg shadow-violet-600/20"
+                className="mt-6 w-full py-3.5 rounded-xl font-semibold bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 disabled:opacity-40 transition-all flex items-center justify-center gap-2"
               >
                 {loading ? (
                   <>
@@ -451,9 +271,7 @@ export default function Home() {
                 )}
               </button>
 
-              {error && (
-                <p className="mt-4 text-center text-red-400 text-sm">{error}</p>
-              )}
+              {error && <p className="mt-4 text-center text-red-400 text-sm">{error}</p>}
             </div>
 
             {(currentImage || loading) && (
@@ -467,15 +285,11 @@ export default function Home() {
                   ) : (
                     currentImage && (
                       <>
-                        <img
-                          src={currentImage}
-                          alt="Generated"
-                          className="w-full h-full object-cover"
-                        />
+                        <img src={currentImage} alt="Generated" className="w-full h-full object-cover" />
                         <div className="absolute bottom-4 right-4 flex gap-2">
                           <button
                             onClick={() => downloadImage(currentImage, prompt)}
-                            className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-black/70 hover:bg-black/90 text-sm backdrop-blur"
+                            className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-black/70 hover:bg-black/90 text-sm"
                           >
                             <Download className="w-4 h-4" /> Download
                           </button>
@@ -483,7 +297,7 @@ export default function Home() {
                             href={currentImage}
                             target="_blank"
                             rel="noreferrer"
-                            className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-black/70 hover:bg-black/90 text-sm backdrop-blur"
+                            className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-black/70 hover:bg-black/90 text-sm"
                           >
                             <ExternalLink className="w-4 h-4" /> Open
                           </a>
@@ -502,21 +316,9 @@ export default function Home() {
             <div>
               <h2 className="text-2xl font-bold mb-1">API Keys</h2>
               <p className="text-white/50 text-sm">
-                Create keys to use PixelForge in your own apps, scripts, or websites.
+                Create keys to use this service in your own projects
               </p>
             </div>
-
-            {!user && (
-              <div className="bg-violet-500/10 border border-violet-500/20 rounded-xl p-4 text-sm text-violet-200 flex items-center justify-between gap-4">
-                <span>Sign in to save your API keys across devices.</span>
-                <button
-                  onClick={() => setShowLogin(true)}
-                  className="px-3 py-1.5 rounded-lg bg-violet-600 hover:bg-violet-500 text-xs font-medium whitespace-nowrap"
-                >
-                  Sign in
-                </button>
-              </div>
-            )}
 
             <div className="bg-[#121826] border border-white/10 rounded-2xl p-6">
               <div className="flex flex-col sm:flex-row gap-3">
@@ -528,7 +330,7 @@ export default function Home() {
                 />
                 <button
                   onClick={createApiKey}
-                  className="flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-violet-600 hover:bg-violet-500 font-medium text-sm transition-all"
+                  className="flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-violet-600 hover:bg-violet-500 font-medium text-sm"
                 >
                   <Plus className="w-4 h-4" /> Create Key
                 </button>
@@ -538,7 +340,7 @@ export default function Home() {
             {apiKeys.length === 0 ? (
               <div className="text-center py-16 text-white/40">
                 <Key className="w-12 h-12 mx-auto mb-4 opacity-40" />
-                <p>No API keys yet. Create one to get started.</p>
+                <p>No API keys yet. Create one above.</p>
               </div>
             ) : (
               <div className="space-y-3">
@@ -562,13 +364,9 @@ export default function Home() {
                         className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-sm"
                       >
                         {copiedKey === k.key ? (
-                          <>
-                            <Check className="w-3.5 h-3.5 text-green-400" /> Copied
-                          </>
+                          <><Check className="w-3.5 h-3.5 text-green-400" /> Copied</>
                         ) : (
-                          <>
-                            <Copy className="w-3.5 h-3.5" /> Copy
-                          </>
+                          <><Copy className="w-3.5 h-3.5" /> Copy</>
                         )}
                       </button>
                       <button
@@ -582,6 +380,10 @@ export default function Home() {
                 ))}
               </div>
             )}
+
+            <div className="bg-white/5 border border-white/10 rounded-xl p-4 text-sm text-white/60">
+              Keys are stored in your browser. Use them with the API endpoint shown in the Docs tab.
+            </div>
           </div>
         )}
 
@@ -589,20 +391,20 @@ export default function Home() {
           <div className="space-y-6">
             <div>
               <h2 className="text-2xl font-bold mb-1">Generation History</h2>
-              <p className="text-white/50 text-sm">Your recent images</p>
+              <p className="text-white/50 text-sm">Recent images (saved in your browser)</p>
             </div>
 
             {history.length === 0 ? (
               <div className="text-center py-20 text-white/40">
                 <History className="w-12 h-12 mx-auto mb-4 opacity-40" />
-                <p>No generations yet. Create something beautiful!</p>
+                <p>No generations yet</p>
               </div>
             ) : (
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
                 {history.map((item) => (
                   <div
                     key={item.id}
-                    className="group relative aspect-square rounded-xl overflow-hidden border border-white/10 bg-[#121826] cursor-pointer"
+                    className="group relative aspect-square rounded-xl overflow-hidden border border-white/10 cursor-pointer"
                     onClick={() => {
                       setCurrentImage(item.url);
                       setActiveTab("generate");
@@ -611,7 +413,7 @@ export default function Home() {
                     <img
                       src={item.url}
                       alt={item.prompt}
-                      className="w-full h-full object-cover transition-transform group-hover:scale-105"
+                      className="w-full h-full object-cover group-hover:scale-105 transition-transform"
                     />
                     <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-3">
                       <p className="text-xs line-clamp-2">{item.prompt}</p>
@@ -627,9 +429,7 @@ export default function Home() {
           <div className="max-w-3xl mx-auto space-y-8">
             <div>
               <h2 className="text-2xl font-bold mb-1">API Documentation</h2>
-              <p className="text-white/50 text-sm">
-                Use PixelForge in your own projects
-              </p>
+              <p className="text-white/50 text-sm">Use PixelForge in your own projects</p>
             </div>
 
             <div className="bg-[#121826] border border-white/10 rounded-2xl p-6 space-y-6">
@@ -643,33 +443,22 @@ export default function Home() {
               </div>
 
               <div>
-                <h3 className="font-semibold mb-2">Request Body</h3>
+                <h3 className="font-semibold mb-2">Example</h3>
+                <pre className="bg-[#0b0f19] p-4 rounded-lg text-sm overflow-x-auto text-green-300/90">
+{`curl -X POST https://your-site.vercel.app/api/v1/generate \\
+  -H "Content-Type: application/json" \\
+  -d '{"prompt": "a cute robot cat"}'`}
+                </pre>
+              </div>
+
+              <div>
+                <h3 className="font-semibold mb-2">Response</h3>
                 <pre className="bg-[#0b0f19] p-4 rounded-lg text-sm overflow-x-auto text-white/80">
 {`{
-  "prompt": "a futuristic city at night",
-  "style": "cyberpunk, neon",
-  "width": 1024,
-  "height": 1024,
-  "model": "flux"
+  "success": true,
+  "image_url": "https://image.pollinations.ai/...",
+  "prompt": "a cute robot cat"
 }`}
-                </pre>
-              </div>
-
-              <div>
-                <h3 className="font-semibold mb-2">Headers (optional)</h3>
-                <pre className="bg-[#0b0f19] p-4 rounded-lg text-sm text-white/80">
-{`Authorization: Bearer sk_live_your_api_key_here
-Content-Type: application/json`}
-                </pre>
-              </div>
-
-              <div>
-                <h3 className="font-semibold mb-2">Example (curl)</h3>
-                <pre className="bg-[#0b0f19] p-4 rounded-lg text-sm overflow-x-auto text-green-300/90">
-{`curl -X POST https://your-domain.vercel.app/api/v1/generate \\
-  -H "Content-Type: application/json" \\
-  -H "Authorization: Bearer sk_live_xxxxx" \\
-  -d '{"prompt": "a cute robot cat"}'`}
                 </pre>
               </div>
             </div>
@@ -677,10 +466,8 @@ Content-Type: application/json`}
             <div className="bg-[#121826] border border-white/10 rounded-2xl p-6">
               <h3 className="font-semibold mb-3">Who generates the images?</h3>
               <p className="text-white/60 text-sm leading-relaxed">
-                Images are generated by{" "}
-                <strong className="text-white">Pollinations.ai</strong> — a free,
-                open community service that runs models like Flux. This keeps
-                PixelForge completely free for everyone.
+                Images are generated by <strong className="text-white">Pollinations.ai</strong> — 
+                a free open community service running models like Flux. That’s why everything stays free.
               </p>
             </div>
           </div>
@@ -688,8 +475,8 @@ Content-Type: application/json`}
       </main>
 
       <footer className="border-t border-white/10 py-8 text-center text-sm text-white/40">
-        <p>PixelForge — Free AI Image API • Powered by Pollinations.ai</p>
-        <p className="mt-1">Made with ❤️ for builders</p>
+        <p>PixelForge — Free AI Image API</p>
+        <p className="mt-1">Powered by Pollinations.ai</p>
       </footer>
     </div>
   );
