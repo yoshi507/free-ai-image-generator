@@ -13,8 +13,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Free AI Image Generator — Unlimited & Free",
-  description: "Generate stunning AI images for free with unlimited use. No account required. Optional Google sign-in.",
+  title: "PixelForge — Free AI Image Generation API",
+  description:
+    "Generate stunning AI images for free. Unlimited use, no account required. Get API keys to use in your own projects.",
 };
 
 export default function RootLayout({
@@ -23,8 +24,11 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}>
-      <body className="min-h-full flex flex-col bg-gradient-to-br from-slate-950 via-indigo-950 to-slate-900 text-white">
+    <html
+      lang="en"
+      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+    >
+      <body className="min-h-full flex flex-col bg-[#0b0f19] text-white">
         {children}
       </body>
     </html>
