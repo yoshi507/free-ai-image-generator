@@ -1,27 +1,20 @@
 # PixelForge — Free AI Image Generation API
 
-A clean, professional free AI image generator with its own API keys.
+Professional free AI image generator with built-in API keys.
 
 ## Features
 
-- Generate unlimited AI images for free
-- Create & manage API keys (stored in your browser)
+- Unlimited free image generation (Pollinations / Flux)
+- Create & manage API keys (browser localStorage)
 - Generation history
-- Full API documentation
-- No accounts, no paid services, no environment variables
+- Full API docs
+- No accounts, no env vars, no paid services
 
-## Who generates the images?
+## Deploy free on Vercel
 
-**[Pollinations.ai](https://pollinations.ai)** — free open models (Flux and related).
-
-## Deploy for free (no upgrade needed)
-
-1. Open [vercel.com](https://vercel.com) and sign in with GitHub
-2. **Add New Project** → import `yoshi507/free-ai-image-generator`
-3. Click **Deploy** (leave env vars empty)
-4. You get a live `*.vercel.app` URL with the API working
-
-Every push to `main` redeploys automatically.
+1. Import this repo on [vercel.com](https://vercel.com) (GitHub sign-in)
+2. Deploy with empty environment variables
+3. Live at `*.vercel.app`
 
 ## API
 
@@ -31,13 +24,9 @@ curl -X POST https://YOUR-SITE.vercel.app/api/v1/generate \
   -d '{"prompt": "a quiet harbour at dawn"}'
 ```
 
-Optional header: `Authorization: Bearer sk_live_...` (keys from the in-app API Keys tab).
-
-## Local development
+## Local
 
 ```bash
 npm install
 npm run dev
 ```
-
-Open [http://localhost:3000](http://localhost:3000).

@@ -1,46 +1,41 @@
 import { NextRequest, NextResponse } from "next/server";
+import { buildImageUrl } from "@/lib/pollinations";
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { prompt, style = "", width = 1024, height = 1024, model = "flux" } = body;
-
-    if (!prompt || typeof prompt !== "string" || prompt.trim().length < 2) {
+    const prompt = typeof body.prompt === "string" ? body.prompt : "";
+    if (prompt.trim().length < 2) {
       return NextResponse.json(
         { error: "Prompt is required and must be at least 2 characters" },
         { status: 400 }
       );
     }
 
+    const style = typeof body.style === "string" ? body.style : "";
+    const width = typeof body.width === "number" ? body.width : 1024;
+    const height = typeof body.height === "number" ? body.height : 1024;
+    const model = typeof body.model === "string" ? body.model : "flux";
+
     const authHeader = req.headers.get("authorization");
-    const apiKey = authHeader?.startsWith("Bearer ")
-      ? authHeader.slice(7)
-      : body.api_key || null;
+    const apiKeyUsed = Boolean(authHeader?.startsWith("Bearer "));
 
-    const fullPrompt = style ? `${prompt.trim()}, ${style}` : prompt.trim();
-    const seed = Math.floor(Math.random() * 1_000_000);
-
-    const imageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(
-      fullPrompt
-    )}?width=${width}&height=${height}&nologo=true&model=${model}&seed=${seed}&enhance=true`;
+    const result = buildImageUrl({ prompt, style, width, height, model });
 
     return NextResponse.json({
       success: true,
-      image_url: imageUrl,
-      prompt: fullPrompt,
+      image_url: result.url,
+      prompt: result.fullPrompt,
       model,
       width,
       height,
-      seed,
-      api_key_used: apiKey ? true : false,
+      seed: result.seed,
+      api_key_used: apiKeyUsed,
       generated_at: new Date().toISOString(),
     });
   } catch (err) {
     console.error(err);
-    return NextResponse.json(
-      { error: "Failed to generate image" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Failed to generate image" }, { status: 500 });
   }
 }
 
@@ -49,25 +44,18 @@ export async function GET(req: NextRequest) {
   const prompt = searchParams.get("prompt");
 
   if (!prompt) {
-    return NextResponse.json(
-      {
-        message: "Free AI Image Generation API",
-        usage: "POST /api/v1/generate with JSON { prompt, style?, width?, height? }",
-        auth: "Optional: Authorization: Bearer YOUR_API_KEY",
-        example: "/api/v1/generate?prompt=a%20cute%20cat",
-      },
-      { status: 200 }
-    );
+    return NextResponse.json({
+      message: "PixelForge image API",
+      usage: "POST /api/v1/generate with JSON { prompt, style?, width?, height? }",
+      auth: "Optional: Authorization: Bearer YOUR_API_KEY",
+    });
   }
 
-  const seed = Math.floor(Math.random() * 1_000_000);
-  const imageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(
-    prompt
-  )}?width=1024&height=1024&nologo=true&model=flux&seed=${seed}&enhance=true`;
-
+  const result = buildImageUrl({ prompt });
   return NextResponse.json({
     success: true,
-    image_url: imageUrl,
-    prompt,
+    image_url: result.url,
+    prompt: result.fullPrompt,
+    seed: result.seed,
   });
 }
