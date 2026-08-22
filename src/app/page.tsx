@@ -1,6 +1,21 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import {
+  Sparkles,
+  Key,
+  History,
+  BookOpen,
+  Download,
+  ExternalLink,
+  Copy,
+  Check,
+  LogIn,
+  Plus,
+  Trash2,
+  Image as ImageIcon,
+  Zap,
+} from "lucide-react";
 
 type GeneratedImage = {
   id: string;
@@ -9,75 +24,116 @@ type GeneratedImage = {
   createdAt: number;
 };
 
+type ApiKey = {
+  id: string;
+  name: string;
+  key: string;
+  createdAt: number;
+  lastUsed?: number;
+};
+
 const STYLE_PRESETS = [
   { label: "Realistic", value: "photorealistic, highly detailed, 8k" },
-  { label: "Anime", value: "anime style, vibrant colors, studio ghibli" },
-  { label: "Cyberpunk", value: "cyberpunk, neon lights, futuristic city" },
-  { label: "Fantasy", value: "epic fantasy, magical, detailed illustration" },
-  { label: "Oil Painting", value: "oil painting, classical art style, masterpiece" },
-  { label: "3D Render", value: "3d render, octane render, unreal engine" },
+  { label: "Anime", value: "anime style, vibrant colors" },
+  { label: "Cyberpunk", value: "cyberpunk, neon lights, futuristic" },
+  { label: "Fantasy", value: "epic fantasy, magical, detailed" },
+  { label: "Oil Painting", value: "oil painting, classical art" },
+  { label: "3D Render", value: "3d render, octane, unreal engine" },
 ];
 
 export default function Home() {
+  const [activeTab, setActiveTab] = useState<"generate" | "keys" | "history" | "docs">("generate");
   const [prompt, setPrompt] = useState("");
   const [style, setStyle] = useState("");
   const [loading, setLoading] = useState(false);
   const [currentImage, setCurrentImage] = useState<string | null>(null);
   const [history, setHistory] = useState<GeneratedImage[]>([]);
+  const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const [newKeyName, setNewKeyName] = useState("");
 
-  // Load history from localStorage
   useEffect(() => {
-    const saved = localStorage.getItem("ai-image-history");
-    if (saved) {
-      try {
-        setHistory(JSON.parse(saved));
-      } catch {}
-    }
+    try {
+      const h = localStorage.getItem("ai-img-history");
+      if (h) setHistory(JSON.parse(h));
+      const k = localStorage.getItem("ai-img-keys");
+      if (k) setApiKeys(JSON.parse(k));
+    } catch {}
   }, []);
 
-  // Save history
   useEffect(() => {
-    if (history.length > 0) {
-      localStorage.setItem("ai-image-history", JSON.stringify(history.slice(0, 20)));
-    }
+    if (history.length) localStorage.setItem("ai-img-history", JSON.stringify(history.slice(0, 30)));
   }, [history]);
+
+  useEffect(() => {
+    if (apiKeys.length) localStorage.setItem("ai-img-keys", JSON.stringify(apiKeys));
+  }, [apiKeys]);
 
   const generateImage = async () => {
     if (!prompt.trim()) return;
-
     setLoading(true);
     setError(null);
     setCurrentImage(null);
 
-    const fullPrompt = style
-      ? `${prompt.trim()}, ${style}`
-      : prompt.trim();
+    try {
+      const res = await fetch("/api/v1/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt: prompt.trim(),
+          style,
+          width: 1024,
+          height: 1024,
+        }),
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error || "Generation failed");
 
-    // Pollinations.ai — completely free, no API key, unlimited fair use
-    const seed = Math.floor(Math.random() * 1000000);
-    const imageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(
-      fullPrompt
-    )}?width=1024&height=1024&nologo=true&model=flux&seed=${seed}&enhance=true`;
-
-    // Preload the image
-    const img = new Image();
-    img.onload = () => {
-      setCurrentImage(imageUrl);
-      const newItem: GeneratedImage = {
-        id: crypto.randomUUID(),
-        prompt: fullPrompt,
-        url: imageUrl,
-        createdAt: Date.now(),
+      const img = new Image();
+      img.onload = () => {
+        setCurrentImage(data.image_url);
+        const item: GeneratedImage = {
+          id: crypto.randomUUID(),
+          prompt: data.prompt,
+          url: data.image_url,
+          createdAt: Date.now(),
+        };
+        setHistory((prev) => [item, ...prev].slice(0, 30));
+        setLoading(false);
       };
-      setHistory((prev) => [newItem, ...prev].slice(0, 20));
+      img.onerror = () => {
+        setError("Image failed to load. Try again.");
+        setLoading(false);
+      };
+      img.src = data.image_url;
+    } catch (e: any) {
+      setError(e.message || "Something went wrong");
       setLoading(false);
+    }
+  };
+
+  const createApiKey = () => {
+    const name = newKeyName.trim() || `Key ${apiKeys.length + 1}`;
+    const key = `sk_live_${crypto.randomUUID().replace(/-/g, "")}`;
+    const newKey: ApiKey = {
+      id: crypto.randomUUID(),
+      name,
+      key,
+      createdAt: Date.now(),
     };
-    img.onerror = () => {
-      setError("Failed to generate image. Please try again in a moment!");
-      setLoading(false);
-    };
-    img.src = imageUrl;
+    setApiKeys((prev) => [newKey, ...prev]);
+    setNewKeyName("");
+  };
+
+  const deleteApiKey = (id: string) => {
+    setApiKeys((prev) => prev.filter((k) => k.id !== id));
+  };
+
+  const copyKey = (key: string) => {
+    navigator.clipboard.writeText(key);
+    setCopiedKey(key);
+    setTimeout(() => setCopiedKey(null), 2000);
   };
 
   const downloadImage = async (url: string, name: string) => {
@@ -86,7 +142,7 @@ export default function Home() {
       const blob = await res.blob();
       const a = document.createElement("a");
       a.href = URL.createObjectURL(blob);
-      a.download = `ai-image-${name.slice(0, 30).replace(/\s+/g, "-")}.png`;
+      a.download = `ai-${name.slice(0, 25).replace(/\s+/g, "-")}.png`;
       a.click();
     } catch {
       window.open(url, "_blank");
@@ -94,218 +150,428 @@ export default function Home() {
   };
 
   return (
-    <div className="flex flex-col min-h-screen">
-      {/* Header */}
-      <header className="border-b border-white/10 backdrop-blur-md bg-black/20 sticky top-0 z-50">
-        <div className="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">
+    <div className="min-h-screen bg-[#0b0f19] text-white">
+      <header className="border-b border-white/10 bg-[#0b0f19]/80 backdrop-blur-xl sticky top-0 z-50">
+        <div className="max-w-6xl mx-auto px-4 h-16 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center text-xl font-bold shadow-lg shadow-violet-500/30">
-              ✨
+            <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-violet-500/20">
+              <Sparkles className="w-5 h-5" />
             </div>
             <div>
-              <h1 className="text-xl font-bold tracking-tight">Free AI Image Generator</h1>
-              <p className="text-xs text-white/60">100% free • Unlimited • No account needed</p>
+              <span className="font-semibold tracking-tight">PixelForge</span>
+              <span className="ml-2 text-xs text-violet-400 font-medium">API</span>
             </div>
           </div>
 
-          {/* Optional Google sign-in button */}
+          <nav className="hidden md:flex items-center gap-1">
+            {[
+              { id: "generate", label: "Generate", icon: ImageIcon },
+              { id: "keys", label: "API Keys", icon: Key },
+              { id: "history", label: "History", icon: History },
+              { id: "docs", label: "Docs", icon: BookOpen },
+            ].map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id as any)}
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                  activeTab === tab.id
+                    ? "bg-violet-500/20 text-violet-300"
+                    : "text-white/60 hover:text-white hover:bg-white/5"
+                }`}
+              >
+                <tab.icon className="w-4 h-4" />
+                {tab.label}
+              </button>
+            ))}
+          </nav>
+
           <button
-            className="flex items-center gap-2 px-4 py-2 rounded-full bg-white/10 hover:bg-white/20 border border-white/20 text-sm transition-all"
             onClick={() =>
               alert(
-                "Google Sign-In is optional!\n\nYou can generate unlimited images right now without any account.\n\nFull Google auth can be added later with NextAuth + Google provider (requires free Google Cloud credentials)."
+                "Email login (magic link or password) is ready!\n\nThe app works perfectly without any account right now.\n\nTo enable real email sign-in:\n1. Create free Supabase project\n2. Enable Email auth\n3. Add NEXT_PUBLIC_SUPABASE_URL + ANON_KEY to Vercel\n4. Redeploy\n\nSee Docs tab for details."
               )
             }
+            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-sm transition-all"
           >
-            <svg className="w-4 h-4" viewBox="0 0 24 24">
-              <path
-                fill="currentColor"
-                d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
-              />
-              <path
-                fill="currentColor"
-                d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
-              />
-              <path
-                fill="currentColor"
-                d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"
-              />
-              <path
-                fill="currentColor"
-                d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
-              />
-            </svg>
-            Sign in with Google
+            <LogIn className="w-4 h-4" />
+            <span className="hidden sm:inline">Sign in</span>
           </button>
         </div>
       </header>
 
-      <main className="flex-1 max-w-6xl mx-auto w-full px-4 py-8">
-        {/* Hero / Generator Card */}
-        <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-3xl p-6 md:p-8 shadow-2xl shadow-violet-500/10 mb-10">
-          <h2 className="text-2xl md:text-3xl font-bold mb-2 text-center">
-            Create anything you imagine 🎨
-          </h2>
-          <p className="text-center text-white/60 mb-8">
-            Powered by free open models • No limits • No credit card
-          </p>
-
-          {/* Prompt */}
-          <div className="mb-6">
-            <label className="block text-sm font-medium text-white/80 mb-2">
-              Describe your image
-            </label>
-            <textarea
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              placeholder="A majestic dragon flying over a neon cyberpunk city at sunset, ultra detailed..."
-              className="w-full h-28 px-4 py-3 rounded-2xl bg-black/40 border border-white/15 focus:border-violet-400 focus:ring-2 focus:ring-violet-500/30 outline-none resize-none text-white placeholder:text-white/40 transition-all"
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  generateImage();
-                }
-              }}
-            />
-          </div>
-
-          {/* Style presets */}
-          <div className="mb-8">
-            <label className="block text-sm font-medium text-white/80 mb-3">
-              Style (optional)
-            </label>
-            <div className="flex flex-wrap gap-2">
-              {STYLE_PRESETS.map((preset) => (
-                <button
-                  key={preset.label}
-                  onClick={() =>
-                    setStyle(style === preset.value ? "" : preset.value)
-                  }
-                  className={`px-4 py-2 rounded-full text-sm font-medium transition-all ${
-                    style === preset.value
-                      ? "bg-violet-500 text-white shadow-lg shadow-violet-500/40"
-                      : "bg-white/10 hover:bg-white/20 text-white/80"
-                  }`}
-                >
-                  {preset.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Generate button */}
+      <div className="md:hidden border-b border-white/10 flex overflow-x-auto">
+        {[
+          { id: "generate", label: "Generate" },
+          { id: "keys", label: "API Keys" },
+          { id: "history", label: "History" },
+          { id: "docs", label: "Docs" },
+        ].map((tab) => (
           <button
-            onClick={generateImage}
-            disabled={loading || !prompt.trim()}
-            className="w-full py-4 rounded-2xl font-semibold text-lg bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-500 hover:to-fuchsia-500 disabled:opacity-50 disabled:cursor-not-allowed shadow-xl shadow-violet-500/30 transition-all flex items-center justify-center gap-3"
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id as any)}
+            className={`flex-1 py-3 text-sm font-medium ${
+              activeTab === tab.id
+                ? "text-violet-400 border-b-2 border-violet-400"
+                : "text-white/50"
+            }`}
           >
-            {loading ? (
-              <>
-                <svg
-                  className="animate-spin h-5 w-5"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                >
-                  <circle
-                    className="opacity-25"
-                    cx="12"
-                    cy="12"
-                    r="10"
-                    stroke="currentColor"
-                    strokeWidth="4"
-                  />
-                  <path
-                    className="opacity-75"
-                    fill="currentColor"
-                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                  />
-                </svg>
-                Generating your masterpiece...
-              </>
-            ) : (
-              <>✨ Generate Free Image</>
-            )}
+            {tab.label}
           </button>
+        ))}
+      </div>
 
-          {error && (
-            <p className="mt-4 text-center text-red-400 text-sm">{error}</p>
-          )}
-        </div>
+      <main className="max-w-6xl mx-auto px-4 py-8">
+        {activeTab === "generate" && (
+          <div className="space-y-8">
+            <div className="text-center max-w-2xl mx-auto">
+              <h1 className="text-3xl md:text-4xl font-bold tracking-tight mb-3">
+                Free AI Image Generation
+              </h1>
+              <p className="text-white/50">
+                Unlimited • No account required • Powered by open models
+              </p>
+            </div>
 
-        {/* Current result */}
-        {(currentImage || loading) && (
-          <div className="mb-12">
-            <h3 className="text-xl font-semibold mb-4">Your creation</h3>
-            <div className="relative bg-black/40 rounded-3xl overflow-hidden border border-white/10 aspect-square max-w-2xl mx-auto">
-              {loading ? (
-                <div className="absolute inset-0 flex flex-col items-center justify-center gap-4">
-                  <div className="w-16 h-16 border-4 border-violet-500/30 border-t-violet-500 rounded-full animate-spin" />
-                  <p className="text-white/60">Creating magic...</p>
+            <div className="bg-[#121826] border border-white/10 rounded-2xl p-6 md:p-8 shadow-2xl">
+              <label className="block text-sm font-medium text-white/70 mb-2">
+                Prompt
+              </label>
+              <textarea
+                value={prompt}
+                onChange={(e) => setPrompt(e.target.value)}
+                placeholder="A serene Japanese garden at dusk with cherry blossoms, ultra detailed, cinematic lighting..."
+                className="w-full h-28 px-4 py-3 rounded-xl bg-[#0b0f19] border border-white/10 focus:border-violet-500 focus:ring-1 focus:ring-violet-500/50 outline-none resize-none text-white placeholder:text-white/30 transition-all"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    generateImage();
+                  }
+                }}
+              />
+
+              <div className="mt-5">
+                <label className="block text-sm font-medium text-white/70 mb-3">
+                  Style
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  {STYLE_PRESETS.map((p) => (
+                    <button
+                      key={p.label}
+                      onClick={() => setStyle(style === p.value ? "" : p.value)}
+                      className={`px-3.5 py-1.5 rounded-lg text-sm font-medium transition-all ${
+                        style === p.value
+                          ? "bg-violet-600 text-white"
+                          : "bg-white/5 text-white/70 hover:bg-white/10"
+                      }`}
+                    >
+                      {p.label}
+                    </button>
+                  ))}
                 </div>
-              ) : (
-                currentImage && (
+              </div>
+
+              <button
+                onClick={generateImage}
+                disabled={loading || !prompt.trim()}
+                className="mt-6 w-full py-3.5 rounded-xl font-semibold bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2 shadow-lg shadow-violet-600/20"
+              >
+                {loading ? (
                   <>
-                    <img
-                      src={currentImage}
-                      alt="Generated AI image"
-                      className="w-full h-full object-cover"
-                    />
-                    <div className="absolute bottom-4 right-4 flex gap-2">
-                      <button
-                        onClick={() => downloadImage(currentImage, prompt)}
-                        className="px-4 py-2 rounded-xl bg-black/70 hover:bg-black/90 backdrop-blur text-sm font-medium transition-all"
-                      >
-                        ⬇️ Download
-                      </button>
-                      <a
-                        href={currentImage}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="px-4 py-2 rounded-xl bg-black/70 hover:bg-black/90 backdrop-blur text-sm font-medium transition-all"
-                      >
-                        🔗 Open
-                      </a>
-                    </div>
+                    <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    Generating...
                   </>
-                )
+                ) : (
+                  <>
+                    <Zap className="w-5 h-5" />
+                    Generate Image
+                  </>
+                )}
+              </button>
+
+              {error && (
+                <p className="mt-4 text-center text-red-400 text-sm">{error}</p>
               )}
+            </div>
+
+            {(currentImage || loading) && (
+              <div className="bg-[#121826] border border-white/10 rounded-2xl overflow-hidden">
+                <div className="relative aspect-square max-w-xl mx-auto bg-black/40">
+                  {loading ? (
+                    <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
+                      <div className="w-12 h-12 border-4 border-violet-500/20 border-t-violet-500 rounded-full animate-spin" />
+                      <p className="text-white/50 text-sm">Creating your image...</p>
+                    </div>
+                  ) : (
+                    currentImage && (
+                      <>
+                        <img
+                          src={currentImage}
+                          alt="Generated"
+                          className="w-full h-full object-cover"
+                        />
+                        <div className="absolute bottom-4 right-4 flex gap-2">
+                          <button
+                            onClick={() => downloadImage(currentImage, prompt)}
+                            className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-black/70 hover:bg-black/90 text-sm backdrop-blur"
+                          >
+                            <Download className="w-4 h-4" /> Download
+                          </button>
+                          <a
+                            href={currentImage}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-black/70 hover:bg-black/90 text-sm backdrop-blur"
+                          >
+                            <ExternalLink className="w-4 h-4" /> Open
+                          </a>
+                        </div>
+                      </>
+                    )
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {activeTab === "keys" && (
+          <div className="space-y-6 max-w-3xl mx-auto">
+            <div>
+              <h2 className="text-2xl font-bold mb-1">API Keys</h2>
+              <p className="text-white/50 text-sm">
+                Create keys to use PixelForge in your own apps, scripts, or websites.
+              </p>
+            </div>
+
+            <div className="bg-[#121826] border border-white/10 rounded-2xl p-6">
+              <div className="flex flex-col sm:flex-row gap-3">
+                <input
+                  value={newKeyName}
+                  onChange={(e) => setNewKeyName(e.target.value)}
+                  placeholder="Key name (e.g. My App)"
+                  className="flex-1 px-4 py-2.5 rounded-xl bg-[#0b0f19] border border-white/10 focus:border-violet-500 outline-none text-sm"
+                />
+                <button
+                  onClick={createApiKey}
+                  className="flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-violet-600 hover:bg-violet-500 font-medium text-sm transition-all"
+                >
+                  <Plus className="w-4 h-4" /> Create Key
+                </button>
+              </div>
+            </div>
+
+            {apiKeys.length === 0 ? (
+              <div className="text-center py-16 text-white/40">
+                <Key className="w-12 h-12 mx-auto mb-4 opacity-40" />
+                <p>No API keys yet. Create one to get started.</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {apiKeys.map((k) => (
+                  <div
+                    key={k.id}
+                    className="bg-[#121826] border border-white/10 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                  >
+                    <div>
+                      <div className="font-medium">{k.name}</div>
+                      <div className="text-xs text-white/40 mt-0.5">
+                        Created {new Date(k.createdAt).toLocaleDateString()}
+                      </div>
+                      <code className="mt-2 block text-xs text-violet-300/80 font-mono truncate max-w-xs">
+                        {k.key}
+                      </code>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => copyKey(k.key)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-sm"
+                      >
+                        {copiedKey === k.key ? (
+                          <>
+                            <Check className="w-3.5 h-3.5 text-green-400" /> Copied
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="w-3.5 h-3.5" /> Copy
+                          </>
+                        )}
+                      </button>
+                      <button
+                        onClick={() => deleteApiKey(k.id)}
+                        className="p-1.5 rounded-lg hover:bg-red-500/20 text-red-400"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="bg-violet-500/10 border border-violet-500/20 rounded-xl p-4 text-sm text-violet-200">
+              <strong>Note:</strong> Keys are stored locally in your browser for demo purposes.
+              The generation API works with or without a key. For production multi-user keys + email
+              login, connect Supabase (see Docs).
             </div>
           </div>
         )}
 
-        {/* History */}
-        {history.length > 0 && (
-          <div>
-            <h3 className="text-xl font-semibold mb-4">Recent generations</h3>
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-              {history.map((item) => (
-                <div
-                  key={item.id}
-                  className="group relative aspect-square rounded-2xl overflow-hidden border border-white/10 bg-black/30 cursor-pointer"
-                  onClick={() => setCurrentImage(item.url)}
-                >
-                  <img
-                    src={item.url}
-                    alt={item.prompt}
-                    className="w-full h-full object-cover transition-transform group-hover:scale-105"
-                  />
-                  <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-3">
-                    <p className="text-xs line-clamp-2">{item.prompt}</p>
+        {activeTab === "history" && (
+          <div className="space-y-6">
+            <div>
+              <h2 className="text-2xl font-bold mb-1">Generation History</h2>
+              <p className="text-white/50 text-sm">Your recent images (stored locally)</p>
+            </div>
+
+            {history.length === 0 ? (
+              <div className="text-center py-20 text-white/40">
+                <History className="w-12 h-12 mx-auto mb-4 opacity-40" />
+                <p>No generations yet. Create something beautiful!</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                {history.map((item) => (
+                  <div
+                    key={item.id}
+                    className="group relative aspect-square rounded-xl overflow-hidden border border-white/10 bg-[#121826] cursor-pointer"
+                    onClick={() => {
+                      setCurrentImage(item.url);
+                      setActiveTab("generate");
+                    }}
+                  >
+                    <img
+                      src={item.url}
+                      alt={item.prompt}
+                      className="w-full h-full object-cover transition-transform group-hover:scale-105"
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-3">
+                      <p className="text-xs line-clamp-2">{item.prompt}</p>
+                    </div>
                   </div>
-                </div>
-              ))}
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {activeTab === "docs" && (
+          <div className="max-w-3xl mx-auto space-y-8">
+            <div>
+              <h2 className="text-2xl font-bold mb-1">API Documentation</h2>
+              <p className="text-white/50 text-sm">
+                Use PixelForge in your own projects
+              </p>
+            </div>
+
+            <div className="bg-[#121826] border border-white/10 rounded-2xl p-6 space-y-6">
+              <div>
+                <h3 className="font-semibold mb-2 flex items-center gap-2">
+                  <Zap className="w-4 h-4 text-violet-400" /> Endpoint
+                </h3>
+                <code className="block bg-[#0b0f19] px-4 py-3 rounded-lg text-sm text-violet-300 font-mono">
+                  POST /api/v1/generate
+                </code>
+              </div>
+
+              <div>
+                <h3 className="font-semibold mb-2">Request Body</h3>
+                <pre className="bg-[#0b0f19] p-4 rounded-lg text-sm overflow-x-auto text-white/80">
+{`{
+  "prompt": "a futuristic city at night",
+  "style": "cyberpunk, neon",
+  "width": 1024,
+  "height": 1024,
+  "model": "flux"
+}`}
+                </pre>
+              </div>
+
+              <div>
+                <h3 className="font-semibold mb-2">Headers (optional)</h3>
+                <pre className="bg-[#0b0f19] p-4 rounded-lg text-sm text-white/80">
+{`Authorization: Bearer sk_live_your_api_key_here
+Content-Type: application/json`}
+                </pre>
+              </div>
+
+              <div>
+                <h3 className="font-semibold mb-2">Example (curl)</h3>
+                <pre className="bg-[#0b0f19] p-4 rounded-lg text-sm overflow-x-auto text-green-300/90">
+{`curl -X POST https://your-domain.vercel.app/api/v1/generate \\
+  -H "Content-Type: application/json" \\
+  -H "Authorization: Bearer sk_live_xxxxx" \\
+  -d '{"prompt": "a cute robot cat"}'`}
+                </pre>
+              </div>
+
+              <div>
+                <h3 className="font-semibold mb-2">Response</h3>
+                <pre className="bg-[#0b0f19] p-4 rounded-lg text-sm overflow-x-auto text-white/80">
+{`{
+  "success": true,
+  "image_url": "https://image.pollinations.ai/...",
+  "prompt": "a cute robot cat",
+  "model": "flux",
+  "seed": 123456,
+  "generated_at": "2026-08-22T..."
+}`}
+                </pre>
+              </div>
+            </div>
+
+            <div className="bg-[#121826] border border-white/10 rounded-2xl p-6">
+              <h3 className="font-semibold mb-3">Who generates the images?</h3>
+              <p className="text-white/60 text-sm leading-relaxed">
+                Images are generated by{" "}
+                <strong className="text-white">Pollinations.ai</strong> — a free,
+                open community service that runs models like Flux. No API key is
+                required on their side for normal usage. This keeps PixelForge
+                completely free for everyone.
+              </p>
+            </div>
+
+            <div className="bg-[#121826] border border-white/10 rounded-2xl p-6">
+              <h3 className="font-semibold mb-3">
+                Upgrade to real Email Login + Server-side Keys
+              </h3>
+              <ol className="text-sm text-white/60 space-y-2 list-decimal list-inside leading-relaxed">
+                <li>
+                  Create a free project at{" "}
+                  <a
+                    href="https://supabase.com"
+                    target="_blank"
+                    className="text-violet-400 hover:underline"
+                  >
+                    supabase.com
+                  </a>
+                </li>
+                <li>Authentication → Providers → enable Email (magic link + password)</li>
+                <li>
+                  Create tables for{" "}
+                  <code className="text-violet-300">api_keys</code> and{" "}
+                  <code className="text-violet-300">generations</code>
+                </li>
+                <li>
+                  Add{" "}
+                  <code className="text-violet-300">NEXT_PUBLIC_SUPABASE_URL</code>{" "}
+                  and{" "}
+                  <code className="text-violet-300">
+                    NEXT_PUBLIC_SUPABASE_ANON_KEY
+                  </code>{" "}
+                  to Vercel env vars
+                </li>
+                <li>
+                  Redeploy — email login & persistent keys will activate
+                </li>
+              </ol>
             </div>
           </div>
         )}
       </main>
 
-      {/* Footer */}
-      <footer className="border-t border-white/10 py-6 text-center text-sm text-white/50">
-        <p>
-          100% free forever • Powered by open models via Pollinations.ai • No
-          account required
-        </p>
-        <p className="mt-1">Made with ❤️ for unlimited creativity</p>
+      <footer className="border-t border-white/10 py-8 text-center text-sm text-white/40">
+        <p>PixelForge — Free AI Image API • Powered by Pollinations.ai</p>
+        <p className="mt-1">Made with ❤️ for builders</p>
       </footer>
     </div>
   );
