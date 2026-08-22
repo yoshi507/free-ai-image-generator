@@ -15,6 +15,7 @@ import {
   Image as ImageIcon,
   Zap,
 } from "lucide-react";
+import { STYLE_PRESETS, buildImageUrl } from "@/lib/pollinations";
 
 type GeneratedImage = {
   id: string;
@@ -30,26 +31,40 @@ type ApiKey = {
   createdAt: number;
 };
 
-const STYLE_PRESETS = [
-  { label: "Realistic", value: "photorealistic, highly detailed, 8k" },
-  { label: "Anime", value: "anime style, vibrant colors" },
-  { label: "Cyberpunk", value: "cyberpunk, neon lights, futuristic" },
-  { label: "Fantasy", value: "epic fantasy, magical, detailed" },
-  { label: "Oil Painting", value: "oil painting, classical art" },
-  { label: "3D Render", value: "3d render, octane, unreal engine" },
+type Tab = "generate" | "keys" | "history" | "docs";
+
+const TABS: { id: Tab; label: string; icon: typeof ImageIcon }[] = [
+  { id: "generate", label: "Generate", icon: ImageIcon },
+  { id: "keys", label: "API Keys", icon: Key },
+  { id: "history", label: "History", icon: History },
+  { id: "docs", label: "Docs", icon: BookOpen },
 ];
 
+function cn(...parts: Array<string | false | null | undefined>) {
+  return parts.filter(Boolean).join(" ");
+}
+
+function preload(src: string) {
+  return new Promise<void>((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve();
+    img.onerror = () => reject(new Error("Image failed to load"));
+    img.src = src;
+  });
+}
+
 export default function Home() {
-  const [activeTab, setActiveTab] = useState<"generate" | "keys" | "history" | "docs">("generate");
+  const [tab, setTab] = useState<Tab>("generate");
+  const [hydrated, setHydrated] = useState(false);
   const [prompt, setPrompt] = useState("");
   const [style, setStyle] = useState("");
   const [loading, setLoading] = useState(false);
-  const [currentImage, setCurrentImage] = useState<string | null>(null);
+  const [currentUrl, setCurrentUrl] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [history, setHistory] = useState<GeneratedImage[]>([]);
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const [copiedKey, setCopiedKey] = useState<string | null>(null);
-  const [newKeyName, setNewKeyName] = useState("");
+  const [keyName, setKeyName] = useState("");
+  const [copied, setCopied] = useState<string | null>(null);
 
   useEffect(() => {
     try {
@@ -58,26 +73,24 @@ export default function Home() {
       const k = localStorage.getItem("pixelforge-keys");
       if (k) setApiKeys(JSON.parse(k));
     } catch {}
+    setHydrated(true);
   }, []);
 
   useEffect(() => {
-    if (history.length) {
-      localStorage.setItem("pixelforge-history", JSON.stringify(history.slice(0, 30)));
-    }
-  }, [history]);
+    if (!hydrated) return;
+    localStorage.setItem("pixelforge-history", JSON.stringify(history.slice(0, 36)));
+  }, [history, hydrated]);
 
   useEffect(() => {
-    if (apiKeys.length) {
-      localStorage.setItem("pixelforge-keys", JSON.stringify(apiKeys));
-    }
-  }, [apiKeys]);
+    if (!hydrated) return;
+    localStorage.setItem("pixelforge-keys", JSON.stringify(apiKeys));
+  }, [apiKeys, hydrated]);
 
-  const generateImage = async () => {
+  async function generate() {
     if (!prompt.trim()) return;
     setLoading(true);
     setError(null);
-    setCurrentImage(null);
-
+    setCurrentUrl(null);
     try {
       const res = await fetch("/api/v1/generate", {
         method: "POST",
@@ -90,393 +103,432 @@ export default function Home() {
         }),
       });
       const data = await res.json();
-      if (!data.success) throw new Error(data.error || "Generation failed");
-
-      const img = new Image();
-      img.onload = () => {
-        setCurrentImage(data.image_url);
-        const item: GeneratedImage = {
-          id: crypto.randomUUID(),
-          prompt: data.prompt,
-          url: data.image_url,
-          createdAt: Date.now(),
-        };
-        setHistory((prev) => [item, ...prev].slice(0, 30));
-        setLoading(false);
-      };
-      img.onerror = () => {
-        setError("Image failed to load. Please try again.");
-        setLoading(false);
-      };
-      img.src = data.image_url;
-    } catch (e: any) {
-      setError(e.message || "Something went wrong");
+      if (!res.ok || !data.success || !data.image_url) {
+        throw new Error(data.error || "Generation failed");
+      }
+      await preload(data.image_url);
+      setCurrentUrl(data.image_url);
+      setHistory((prev) =>
+        [
+          {
+            id: crypto.randomUUID(),
+            prompt: data.prompt || prompt,
+            url: data.image_url,
+            createdAt: Date.now(),
+          },
+          ...prev,
+        ].slice(0, 36)
+      );
+    } catch (err) {
+      const fallback = buildImageUrl({ prompt, style });
+      try {
+        await preload(fallback.url);
+        setCurrentUrl(fallback.url);
+        setHistory((prev) =>
+          [
+            {
+              id: crypto.randomUUID(),
+              prompt: fallback.fullPrompt,
+              url: fallback.url,
+              createdAt: Date.now(),
+            },
+            ...prev,
+          ].slice(0, 36)
+        );
+      } catch {
+        setError(err instanceof Error ? err.message : "Could not generate image");
+      }
+    } finally {
       setLoading(false);
     }
-  };
+  }
 
-  const createApiKey = () => {
-    const name = newKeyName.trim() || `Key ${apiKeys.length + 1}`;
-    const key = `sk_live_${crypto.randomUUID().replace(/-/g, "")}`;
-    setApiKeys((prev) => [
-      { id: crypto.randomUUID(), name, key, createdAt: Date.now() },
-      ...prev,
-    ]);
-    setNewKeyName("");
-  };
+  function createKey() {
+    const bytes = new Uint8Array(18);
+    crypto.getRandomValues(bytes);
+    const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+    const key: ApiKey = {
+      id: crypto.randomUUID(),
+      name: keyName.trim() || `Key ${apiKeys.length + 1}`,
+      key: `sk_live_${hex}`,
+      createdAt: Date.now(),
+    };
+    setApiKeys((prev) => [key, ...prev]);
+    setKeyName("");
+  }
 
-  const deleteApiKey = (id: string) => {
-    setApiKeys((prev) => prev.filter((k) => k.id !== id));
-  };
+  function copy(text: string) {
+    void navigator.clipboard.writeText(text);
+    setCopied(text);
+    window.setTimeout(() => setCopied(null), 1600);
+  }
 
-  const copyKey = (key: string) => {
-    navigator.clipboard.writeText(key);
-    setCopiedKey(key);
-    setTimeout(() => setCopiedKey(null), 2000);
-  };
-
-  const downloadImage = async (url: string, name: string) => {
+  async function download(url: string, name: string) {
     try {
       const res = await fetch(url);
       const blob = await res.blob();
       const a = document.createElement("a");
       a.href = URL.createObjectURL(blob);
-      a.download = `ai-${name.slice(0, 25).replace(/\s+/g, "-")}.png`;
+      a.download = `pixelforge-${name.slice(0, 24).replace(/\s+/g, "-")}.png`;
       a.click();
     } catch {
       window.open(url, "_blank");
     }
-  };
+  }
 
   return (
-    <div className="min-h-screen bg-[#0b0f19] text-white">
-      <header className="border-b border-white/10 bg-[#0b0f19]/80 backdrop-blur-xl sticky top-0 z-50">
-        <div className="max-w-6xl mx-auto px-4 h-16 flex items-center justify-between">
+    <div className="min-h-dvh flex flex-col">
+      <header className="sticky top-0 z-40 border-b border-border bg-bg/90 backdrop-blur-md">
+        <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-violet-500/20">
-              <Sparkles className="w-5 h-5" />
+            <div className="flex size-9 items-center justify-center rounded-lg border border-border-strong bg-subtle">
+              <Sparkles className="size-4 text-primary" strokeWidth={1.75} />
             </div>
             <div>
-              <span className="font-semibold tracking-tight">PixelForge</span>
-              <span className="ml-2 text-xs text-violet-400 font-medium">API</span>
+              <p className="font-[family-name:var(--font-display)] text-lg leading-tight tracking-tight">
+                PixelForge
+              </p>
+              <p className="text-xs text-faint">Image API</p>
             </div>
           </div>
-
           <nav className="hidden md:flex items-center gap-1">
-            {[
-              { id: "generate", label: "Generate", icon: ImageIcon },
-              { id: "keys", label: "API Keys", icon: Key },
-              { id: "history", label: "History", icon: History },
-              { id: "docs", label: "Docs", icon: BookOpen },
-            ].map((tab) => (
+            {TABS.map((item) => (
               <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id as any)}
-                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                  activeTab === tab.id
-                    ? "bg-violet-500/20 text-violet-300"
-                    : "text-white/60 hover:text-white hover:bg-white/5"
-                }`}
+                key={item.id}
+                type="button"
+                onClick={() => setTab(item.id)}
+                className={cn(
+                  "flex h-11 items-center gap-2 rounded-lg px-3 text-sm font-medium transition-colors",
+                  tab === item.id
+                    ? "bg-subtle text-fg"
+                    : "text-muted hover:text-fg hover:bg-subtle/60"
+                )}
               >
-                <tab.icon className="w-4 h-4" />
-                {tab.label}
+                <item.icon className="size-4" strokeWidth={1.75} />
+                {item.label}
               </button>
             ))}
           </nav>
         </div>
+        <div className="flex md:hidden border-t border-border">
+          {TABS.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => setTab(item.id)}
+              className={cn(
+                "flex-1 h-12 text-sm font-medium",
+                tab === item.id
+                  ? "text-fg border-b-2 border-primary"
+                  : "text-faint"
+              )}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
       </header>
 
-      <div className="md:hidden border-b border-white/10 flex">
-        {[
-          { id: "generate", label: "Generate" },
-          { id: "keys", label: "API Keys" },
-          { id: "history", label: "History" },
-          { id: "docs", label: "Docs" },
-        ].map((tab) => (
-          <button
-            key={tab.id}
-            onClick={() => setActiveTab(tab.id as any)}
-            className={`flex-1 py-3 text-sm font-medium ${
-              activeTab === tab.id
-                ? "text-violet-400 border-b-2 border-violet-400"
-                : "text-white/50"
-            }`}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
-
-      <main className="max-w-6xl mx-auto px-4 py-8">
-        {activeTab === "generate" && (
-          <div className="space-y-8">
-            <div className="text-center max-w-2xl mx-auto">
-              <h1 className="text-3xl md:text-4xl font-bold tracking-tight mb-3">
-                Free AI Image Generation
+      <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-8">
+        {tab === "generate" && (
+          <section className="space-y-8">
+            <div className="max-w-xl">
+              <h1 className="font-[family-name:var(--font-display)] text-3xl md:text-4xl tracking-tight leading-tight">
+                Still images, on demand
               </h1>
-              <p className="text-white/50">
-                Unlimited • Completely free • Powered by open models
+              <p className="mt-3 text-muted leading-relaxed">
+                Describe a scene. PixelForge returns a still from open models —
+                free, unlimited, no account.
               </p>
             </div>
 
-            <div className="bg-[#121826] border border-white/10 rounded-2xl p-6 md:p-8">
-              <label className="block text-sm font-medium text-white/70 mb-2">Prompt</label>
+            <div className="rounded-2xl border border-border bg-surface p-5 md:p-6">
+              <label className="block text-sm font-medium text-muted mb-2" htmlFor="prompt">
+                Prompt
+              </label>
               <textarea
+                id="prompt"
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}
-                placeholder="A serene Japanese garden at dusk with cherry blossoms, ultra detailed..."
-                className="w-full h-28 px-4 py-3 rounded-xl bg-[#0b0f19] border border-white/10 focus:border-violet-500 outline-none resize-none text-white placeholder:text-white/30"
+                placeholder="A quiet reading room at dusk, oak shelves, a single lamp, dust in the air"
+                className="min-h-28 w-full rounded-xl border border-border bg-bg px-3 py-3 text-sm text-fg placeholder:text-faint resize-none focus:outline-none focus:border-border-strong focus:ring-2 focus:ring-primary/30"
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && !e.shiftKey) {
                     e.preventDefault();
-                    generateImage();
+                    void generate();
                   }
                 }}
               />
-
-              <div className="mt-5">
-                <label className="block text-sm font-medium text-white/70 mb-3">Style</label>
-                <div className="flex flex-wrap gap-2">
-                  {STYLE_PRESETS.map((p) => (
-                    <button
-                      key={p.label}
-                      onClick={() => setStyle(style === p.value ? "" : p.value)}
-                      className={`px-3.5 py-1.5 rounded-lg text-sm font-medium transition-all ${
-                        style === p.value
-                          ? "bg-violet-600 text-white"
-                          : "bg-white/5 text-white/70 hover:bg-white/10"
-                      }`}
-                    >
-                      {p.label}
-                    </button>
-                  ))}
-                </div>
+              <p className="mt-5 mb-3 text-sm font-medium text-muted">Style</p>
+              <div className="flex flex-wrap gap-2">
+                {STYLE_PRESETS.map((preset) => (
+                  <button
+                    key={preset.label}
+                    type="button"
+                    onClick={() =>
+                      setStyle(style === preset.value ? "" : preset.value)
+                    }
+                    className={cn(
+                      "h-10 px-3 rounded-lg text-sm font-medium border transition-colors",
+                      style === preset.value
+                        ? "bg-primary text-primary-fg border-primary"
+                        : "bg-subtle text-muted border-border hover:text-fg"
+                    )}
+                  >
+                    {preset.label}
+                  </button>
+                ))}
               </div>
-
               <button
-                onClick={generateImage}
+                type="button"
                 disabled={loading || !prompt.trim()}
-                className="mt-6 w-full py-3.5 rounded-xl font-semibold bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 disabled:opacity-40 transition-all flex items-center justify-center gap-2"
+                onClick={() => void generate()}
+                className="mt-6 w-full h-12 rounded-xl font-semibold bg-primary text-primary-fg hover:opacity-90 disabled:opacity-40 transition-all flex items-center justify-center gap-2 active:scale-[0.98]"
               >
                 {loading ? (
                   <>
-                    <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                    Generating...
+                    <span className="size-4 rounded-full border-2 border-primary-fg/30 border-t-primary-fg animate-spin" />
+                    Rendering
                   </>
                 ) : (
                   <>
-                    <Zap className="w-5 h-5" />
-                    Generate Image
+                    <Zap className="size-4" strokeWidth={1.75} />
+                    Generate
                   </>
                 )}
               </button>
-
-              {error && <p className="mt-4 text-center text-red-400 text-sm">{error}</p>}
+              {error && (
+                <p className="mt-4 text-center text-sm text-danger">{error}</p>
+              )}
             </div>
 
-            {(currentImage || loading) && (
-              <div className="bg-[#121826] border border-white/10 rounded-2xl overflow-hidden">
-                <div className="relative aspect-square max-w-xl mx-auto bg-black/40">
-                  {loading ? (
+            {(currentUrl || loading) && (
+              <div className="rounded-2xl border border-border bg-surface overflow-hidden">
+                <div className="relative aspect-square max-w-xl mx-auto bg-subtle">
+                  {loading && (
                     <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
-                      <div className="w-12 h-12 border-4 border-violet-500/20 border-t-violet-500 rounded-full animate-spin" />
-                      <p className="text-white/50 text-sm">Creating your image...</p>
+                      <div className="size-10 rounded-full border-2 border-border-strong border-t-primary animate-spin" />
+                      <p className="text-sm text-muted">Composing the frame</p>
                     </div>
-                  ) : (
-                    currentImage && (
-                      <>
-                        <img src={currentImage} alt="Generated" className="w-full h-full object-cover" />
-                        <div className="absolute bottom-4 right-4 flex gap-2">
-                          <button
-                            onClick={() => downloadImage(currentImage, prompt)}
-                            className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-black/70 hover:bg-black/90 text-sm"
-                          >
-                            <Download className="w-4 h-4" /> Download
-                          </button>
-                          <a
-                            href={currentImage}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-black/70 hover:bg-black/90 text-sm"
-                          >
-                            <ExternalLink className="w-4 h-4" /> Open
-                          </a>
-                        </div>
-                      </>
-                    )
+                  )}
+                  {currentUrl && !loading && (
+                    <>
+                      <img
+                        src={currentUrl}
+                        alt="Generated still"
+                        className="h-full w-full object-cover"
+                      />
+                      <div className="absolute bottom-4 right-4 flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => void download(currentUrl, prompt)}
+                          className="flex h-10 items-center gap-1.5 rounded-lg bg-bg/80 border border-border px-3 text-sm backdrop-blur hover:bg-bg"
+                        >
+                          <Download className="size-4" /> Download
+                        </button>
+                        <a
+                          href={currentUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="flex h-10 items-center gap-1.5 rounded-lg bg-bg/80 border border-border px-3 text-sm backdrop-blur hover:bg-bg"
+                        >
+                          <ExternalLink className="size-4" /> Open
+                        </a>
+                      </div>
+                    </>
                   )}
                 </div>
               </div>
             )}
-          </div>
+          </section>
         )}
 
-        {activeTab === "keys" && (
-          <div className="space-y-6 max-w-3xl mx-auto">
+        {tab === "keys" && (
+          <section className="mx-auto max-w-2xl space-y-6">
             <div>
-              <h2 className="text-2xl font-bold mb-1">API Keys</h2>
-              <p className="text-white/50 text-sm">
-                Create keys to use this service in your own projects
+              <h2 className="font-[family-name:var(--font-display)] text-2xl tracking-tight">
+                API keys
+              </h2>
+              <p className="mt-2 text-sm text-muted leading-relaxed">
+                Issue a key, then call the generate endpoint from your own app.
+                Keys stay in this browser.
               </p>
             </div>
-
-            <div className="bg-[#121826] border border-white/10 rounded-2xl p-6">
+            <div className="rounded-2xl border border-border bg-surface p-5">
               <div className="flex flex-col sm:flex-row gap-3">
                 <input
-                  value={newKeyName}
-                  onChange={(e) => setNewKeyName(e.target.value)}
-                  placeholder="Key name (e.g. My App)"
-                  className="flex-1 px-4 py-2.5 rounded-xl bg-[#0b0f19] border border-white/10 focus:border-violet-500 outline-none text-sm"
+                  value={keyName}
+                  onChange={(e) => setKeyName(e.target.value)}
+                  placeholder="Key name, e.g. Studio script"
+                  className="h-11 flex-1 rounded-xl border border-border bg-bg px-3 text-sm text-fg placeholder:text-faint focus:outline-none focus:border-border-strong focus:ring-2 focus:ring-primary/30"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") createKey();
+                  }}
                 />
                 <button
-                  onClick={createApiKey}
-                  className="flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-violet-600 hover:bg-violet-500 font-medium text-sm"
+                  type="button"
+                  onClick={createKey}
+                  className="flex h-11 items-center justify-center gap-2 rounded-xl bg-primary px-5 text-sm font-medium text-primary-fg hover:opacity-90"
                 >
-                  <Plus className="w-4 h-4" /> Create Key
+                  <Plus className="size-4" /> Create key
                 </button>
               </div>
             </div>
-
-            {apiKeys.length === 0 ? (
-              <div className="text-center py-16 text-white/40">
-                <Key className="w-12 h-12 mx-auto mb-4 opacity-40" />
-                <p>No API keys yet. Create one above.</p>
+            {!hydrated ? (
+              <div className="h-32 rounded-xl bg-subtle animate-pulse" />
+            ) : apiKeys.length === 0 ? (
+              <div className="rounded-2xl border border-border bg-surface py-16 text-center">
+                <Key className="mx-auto size-8 text-faint" strokeWidth={1.5} />
+                <p className="mt-3 text-sm text-muted">No keys yet</p>
               </div>
             ) : (
-              <div className="space-y-3">
+              <ul className="space-y-3">
                 {apiKeys.map((k) => (
-                  <div
+                  <li
                     key={k.id}
-                    className="bg-[#121826] border border-white/10 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                    className="rounded-xl border border-border bg-surface p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
                   >
-                    <div>
-                      <div className="font-medium">{k.name}</div>
-                      <div className="text-xs text-white/40 mt-0.5">
-                        Created {new Date(k.createdAt).toLocaleDateString()}
-                      </div>
-                      <code className="mt-2 block text-xs text-violet-300/80 font-mono truncate max-w-xs">
+                    <div className="min-w-0">
+                      <p className="font-medium">{k.name}</p>
+                      <p className="text-xs text-faint mt-0.5 tabular-nums">
+                        {new Date(k.createdAt).toLocaleDateString()}
+                      </p>
+                      <code className="mt-2 block truncate text-xs font-mono text-muted">
                         {k.key}
                       </code>
                     </div>
                     <div className="flex items-center gap-2">
                       <button
-                        onClick={() => copyKey(k.key)}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-sm"
+                        type="button"
+                        onClick={() => copy(k.key)}
+                        className="flex h-9 items-center gap-1.5 rounded-lg border border-border bg-subtle px-3 text-sm hover:border-border-strong"
                       >
-                        {copiedKey === k.key ? (
-                          <><Check className="w-3.5 h-3.5 text-green-400" /> Copied</>
+                        {copied === k.key ? (
+                          <Check className="size-4 text-ok" />
                         ) : (
-                          <><Copy className="w-3.5 h-3.5" /> Copy</>
+                          <Copy className="size-4" />
                         )}
+                        {copied === k.key ? "Copied" : "Copy"}
                       </button>
                       <button
-                        onClick={() => deleteApiKey(k.id)}
-                        className="p-1.5 rounded-lg hover:bg-red-500/20 text-red-400"
+                        type="button"
+                        aria-label="Delete key"
+                        onClick={() =>
+                          setApiKeys((prev) => prev.filter((x) => x.id !== k.id))
+                        }
+                        className="flex size-9 items-center justify-center rounded-lg hover:bg-danger/15"
                       >
-                        <Trash2 className="w-4 h-4" />
+                        <Trash2 className="size-4 text-danger" />
                       </button>
                     </div>
-                  </div>
+                  </li>
                 ))}
-              </div>
+              </ul>
             )}
-
-            <div className="bg-white/5 border border-white/10 rounded-xl p-4 text-sm text-white/60">
-              Keys are stored in your browser. Use them with the API endpoint shown in the Docs tab.
-            </div>
-          </div>
+          </section>
         )}
 
-        {activeTab === "history" && (
-          <div className="space-y-6">
+        {tab === "history" && (
+          <section className="space-y-6">
             <div>
-              <h2 className="text-2xl font-bold mb-1">Generation History</h2>
-              <p className="text-white/50 text-sm">Recent images (saved in your browser)</p>
+              <h2 className="font-[family-name:var(--font-display)] text-2xl tracking-tight">
+                History
+              </h2>
+              <p className="mt-2 text-sm text-muted">
+                Recent stills from this browser
+              </p>
             </div>
-
-            {history.length === 0 ? (
-              <div className="text-center py-20 text-white/40">
-                <History className="w-12 h-12 mx-auto mb-4 opacity-40" />
-                <p>No generations yet</p>
+            {!hydrated ? (
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+                {Array.from({ length: 4 }).map((_, i) => (
+                  <div
+                    key={i}
+                    className="aspect-square rounded-xl bg-subtle animate-pulse"
+                  />
+                ))}
+              </div>
+            ) : history.length === 0 ? (
+              <div className="rounded-2xl border border-border bg-surface py-20 text-center">
+                <History className="mx-auto size-8 text-faint" strokeWidth={1.5} />
+                <p className="mt-3 text-sm text-muted">Nothing generated yet</p>
               </div>
             ) : (
-              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
                 {history.map((item) => (
-                  <div
+                  <button
                     key={item.id}
-                    className="group relative aspect-square rounded-xl overflow-hidden border border-white/10 cursor-pointer"
+                    type="button"
+                    className="group relative aspect-square overflow-hidden rounded-xl border border-border bg-subtle text-left"
                     onClick={() => {
-                      setCurrentImage(item.url);
-                      setActiveTab("generate");
+                      setCurrentUrl(item.url);
+                      setPrompt(item.prompt);
+                      setTab("generate");
                     }}
                   >
                     <img
                       src={item.url}
-                      alt={item.prompt}
-                      className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                      alt=""
+                      className="h-full w-full object-cover transition-transform duration-200 group-hover:scale-105"
                     />
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-3">
-                      <p className="text-xs line-clamp-2">{item.prompt}</p>
-                    </div>
-                  </div>
+                    <span className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-bg/90 to-transparent p-3 text-xs opacity-0 group-hover:opacity-100 transition-opacity line-clamp-2">
+                      {item.prompt}
+                    </span>
+                  </button>
                 ))}
               </div>
             )}
-          </div>
+          </section>
         )}
 
-        {activeTab === "docs" && (
-          <div className="max-w-3xl mx-auto space-y-8">
+        {tab === "docs" && (
+          <section className="mx-auto max-w-2xl space-y-6">
             <div>
-              <h2 className="text-2xl font-bold mb-1">API Documentation</h2>
-              <p className="text-white/50 text-sm">Use PixelForge in your own projects</p>
+              <h2 className="font-[family-name:var(--font-display)] text-2xl tracking-tight">
+                API
+              </h2>
+              <p className="mt-2 text-sm text-muted">
+                Call PixelForge from any client that can POST JSON.
+              </p>
             </div>
-
-            <div className="bg-[#121826] border border-white/10 rounded-2xl p-6 space-y-6">
+            <div className="rounded-2xl border border-border bg-surface p-5 space-y-5">
               <div>
-                <h3 className="font-semibold mb-2 flex items-center gap-2">
-                  <Zap className="w-4 h-4 text-violet-400" /> Endpoint
-                </h3>
-                <code className="block bg-[#0b0f19] px-4 py-3 rounded-lg text-sm text-violet-300 font-mono">
+                <p className="text-sm font-medium text-muted mb-2">Endpoint</p>
+                <code className="block rounded-xl bg-bg border border-border px-3 py-3 text-sm font-mono text-fg">
                   POST /api/v1/generate
                 </code>
               </div>
-
               <div>
-                <h3 className="font-semibold mb-2">Example</h3>
-                <pre className="bg-[#0b0f19] p-4 rounded-lg text-sm overflow-x-auto text-green-300/90">
-{`curl -X POST https://your-site.vercel.app/api/v1/generate \\
-  -H "Content-Type: application/json" \\
-  -d '{"prompt": "a cute robot cat"}'`}
-                </pre>
+                <p className="text-sm font-medium text-muted mb-2">Body</p>
+                <pre className="rounded-xl bg-bg border border-border px-3 py-3 text-sm font-mono text-muted overflow-x-auto">{`{
+  "prompt": "a quiet harbour at dawn",
+  "style": "editorial photography",
+  "width": 1024,
+  "height": 1024
+}`}</pre>
               </div>
-
               <div>
-                <h3 className="font-semibold mb-2">Response</h3>
-                <pre className="bg-[#0b0f19] p-4 rounded-lg text-sm overflow-x-auto text-white/80">
-{`{
-  "success": true,
-  "image_url": "https://image.pollinations.ai/...",
-  "prompt": "a cute robot cat"
-}`}
+                <p className="text-sm font-medium text-muted mb-2">
+                  Header (optional)
+                </p>
+                <pre className="rounded-xl bg-bg border border-border px-3 py-3 text-sm font-mono text-muted overflow-x-auto">
+                  Authorization: Bearer sk_live_…
                 </pre>
               </div>
             </div>
-
-            <div className="bg-[#121826] border border-white/10 rounded-2xl p-6">
-              <h3 className="font-semibold mb-3">Who generates the images?</h3>
-              <p className="text-white/60 text-sm leading-relaxed">
-                Images are generated by <strong className="text-white">Pollinations.ai</strong> — 
-                a free open community service running models like Flux. That’s why everything stays free.
+            <div className="rounded-2xl border border-border bg-surface p-5">
+              <h3 className="font-medium">Who renders the image</h3>
+              <p className="mt-2 text-sm text-muted leading-relaxed">
+                Frames are produced by Pollinations, a public open-model service
+                (Flux and related checkpoints). PixelForge does not bill for
+                generation and does not require an account.
               </p>
             </div>
-          </div>
+          </section>
         )}
       </main>
 
-      <footer className="border-t border-white/10 py-8 text-center text-sm text-white/40">
-        <p>PixelForge — Free AI Image API</p>
-        <p className="mt-1">Powered by Pollinations.ai</p>
+      <footer className="border-t border-border py-6 text-center text-xs text-faint">
+        PixelForge · open models via Pollinations
       </footer>
     </div>
   );
