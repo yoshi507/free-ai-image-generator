@@ -1,6 +1,6 @@
 {
-  "name": "ai-image-generator",
-  "version": "0.1.0",
+  "name": "free-ai-image-generator",
+  "version": "0.2.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -9,17 +9,22 @@
     "lint": "eslint"
   },
   "dependencies": {
-    "next": "16.3.2",
-    "react": "19.2.8",
-    "react-dom": "19.2.8"
+    "@supabase/ssr": "^0.5.2",
+    "@supabase/supabase-js": "^2.47.10",
+    "lucide-react": "^0.468.0",
+    "next": "15.1.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "uuid": "^11.0.3"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@types/uuid": "^10.0.0",
     "eslint": "^9",
-    "eslint-config-next": "16.3.2",
+    "eslint-config-next": "15.1.0",
     "tailwindcss": "^4",
     "typescript": "^5"
   }
