@@ -8,7 +8,7 @@ A professional, free AI image generation platform with its own API keys.
 - 🔑 **Create your own API keys** to use in external projects
 - 📚 Full API documentation
 - 🕘 Local generation history
-- 🔐 Ready for real Google Sign-In + server-side keys (via Supabase)
+- 🔐 Ready for real Email / Magic Link login + server-side keys (via Supabase)
 - 📱 Fully responsive professional UI
 
 ## Who generates the images?
@@ -41,11 +41,11 @@ curl -X POST https://YOUR-DOMAIN.vercel.app/api/v1/generate \
   -d '{"prompt": "a cute robot cat, highly detailed"}'
 ```
 
-## Enable Real Google Login + Persistent API Keys
+## Enable Real Email Login + Persistent API Keys
 
 1. Create a free project at [supabase.com](https://supabase.com)
-2. Authentication → Providers → enable Google
-3. Create tables for `api_keys` and `generations`
+2. Authentication → Providers → enable Email (supports magic link + password)
+3. Create two tables (`api_keys`, `generations`)
 4. Add these environment variables in Vercel:
    - `NEXT_PUBLIC_SUPABASE_URL`
    - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
